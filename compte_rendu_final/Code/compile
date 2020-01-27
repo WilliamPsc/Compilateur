@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# To compile jflex & jcup
+
+if [ $# != 1 ]
+then
+	echo "Usage : $0 fileName"
+else
+	# Si la compilation ne fonctionne pas : (uncomment next line)
+	 export CLASSPATH=".:/usr/share/java/cup.jar:/usr/share/java/JFlex.jar"
+
+	# Supprimer les fichiers de l'ancienne compilation
+	rm -fv *.java;
+	rm -fv *.class;
+	echo "Files Removed"
+
+	# Compilation
+	echo ""
+	jflex $1.lex
+	echo "LEX OK"
+	echo ""
+	cup $1.cup
+	echo "CUP OK"
+	echo ""
+	javac parser.java sym.java Yylex.java
+
+	# Compilation finie
+	echo "Done"
+	#clear
+
+	# Exécution du code directement après la compilation
+	#java parser
+fi

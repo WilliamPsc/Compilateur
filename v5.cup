@@ -1,0 +1,1017 @@
+// Specification JCup
+import java_cup.runtime.*;
+import java.util.*;
+import java.io.*;
+
+/*
+* @version V5
+* @author Alan LE BOUDEC & William PENSEC
+* @date 13/12/2019
+*/
+
+
+parser code {:
+    public static void main(String args[]) throws Exception {
+    new parser(new Yylex(new InputStreamReader(System.in))).parse();
+    }
+
+    public void syntax_error(Symbol cur_token) {
+        // n'interrompt pas la compil...
+        // on est par defaut dans l'etat error qui permet ensuite la recup
+        // par défaut : report_error("syntax error", null);
+        report_error("Syntaxe incorrecte <"+tokenToString(cur_token)+">", null);
+    }
+
+    public void report_error(String message, Object info) {   
+        // n'interrompt pas la compil
+        if (info == null) System.err.println("Mon erreur <"+ ptext()+ "> ligne "+ pline() + ", colonne " + pcolumn() + " : " + message);
+        else System.err.println("Mon erreur <"+ptext()+ "> ligne "+ pline() + ", colonne " + pcolumn() + " : " +message+" : "+info);
+        System.err.println("-> mais on continue l'analyse... ");
+    }
+
+    public void unrecovered_syntax_error(Symbol cur_token) {
+        // par defaut : report_fatal_error("Couldn't repair and continue parse", null);
+        // on n'a pas reussi a faire de la recup
+        report_fatal_error("Recuperation impossible <"+tokenToString(cur_token)+">", null);   // interrompt la compil    
+    }
+
+    public void report_fatal_error(String message, Object info) {  
+        // qd cette fct est appelee, message vaut par defaut "Couldn't repair and continue parse"
+        String m = "Mon erreur fatale <"+ ptext()+ "> ligne " + pline() + ", colonne " + pcolumn() + " : " + message;
+        if (info == null) System.err.println(m);
+        else System.err.println(m+" : "+info);
+        System.err.println("-> arr�t de l'analyse...");
+        done_parsing(); // interrompt la compil
+      }
+
+    public int pline(){
+        return ((Yylex)getScanner()).getYyLine();
+    }
+    public int pcolumn(){
+        return ((Yylex)getScanner()).getYyColumn();
+    }
+    public String ptext(){
+        return ((Yylex)getScanner()).getYyText();
+    }
+
+
+public String tokenToString (Symbol token) {
+// qqs exemples pour voir...
+     switch (token.sym) {
+    case sym.ENTIER : return "ENTIER "+token.value;
+    case sym.DEBPROG : return "DEBPROG";
+    case sym.FINPROG : return "FINPROG";
+    case sym.DEBAPP : return "DEBAPP";
+    case sym.TYPE : return "TYPE";
+    case sym.IDENT : return "IDENT";
+    case sym.VIRG : return "VIRG";
+    case sym.POINT : return "POINT";
+    case sym.AUTAPP : return "AUTAPP";
+    case sym.PARO : return "PARO";
+    case sym.AUTTYPE : return "AUTTYPE";
+    case sym.PARF : return "PARF";
+    case sym.FINAPP : return "FINAPP";
+    case sym.DEBINTER : return "DEBINTER";
+    case sym.INTER : return "INTER";
+    case sym.FININTER : return "FININTER";
+    case sym.DEBSCENAR : return "DEBSCENAR";
+    case sym.SCENAD : return "SCENAD";
+    case sym.CHEVD : return "CHEVD";
+    case sym.DEQUAL : return "DEQUAL";
+    case sym.EQUL : return "EQUL";
+    case sym.POINTV : return "POINTV";
+    case sym.DEUXP : return "DEUXP";
+    case sym.ACOO : return "ACOO";
+    case sym.ACOF : return "ACOF";
+    case sym.FINSCENAR : return "FINSCENAR";
+    case sym.SCENAF : return "SCENAF";
+    case sym.COMMO : return "COMMO";
+    case sym.COMMF : return "COMMF";
+    case sym.CHAINE : return "CHAINE "+token.value;
+    case sym.COMMENTAIRE : return "COMMENTAIRE";
+    case sym.ACTION : return "ACTION";
+    case sym.ETAT : return "ETAT";
+    case sym.ACTETAT : return "ACTETAT";
+    case sym.ASSOC : return "ASSOC";
+    case sym.PROG : return "PROG";
+    case sym.EXEC : return "EXEC";
+    case sym.POURTT : return "POURTT";
+    case sym.FAIRE : return "FAIRE";
+    case sym.FAIT : return "FAIT";
+    case sym.MESSD : return "MESSD";
+    case sym.SI : return "SI";
+    case sym.ALORS : return "ALORS";
+    case sym.SINON : return "SINON";
+    case sym.FSI : return "FSI";
+    case sym.DEF : return "DEF";
+    case sym.UND : return "UND";
+    case sym.GUIL : return "GUILLEMET";
+    
+    default : return "Token imprévu ou error";
+    }
+}
+
+
+:}
+
+
+
+action code {:
+// Variables résumé final
+int nbApp = 0;
+int nbInter = 0;
+int nbScenar = 0;
+HashMap<String, ArrayList<String>> listeAsso = new HashMap<String, ArrayList<String>>();
+ArrayList<String> listeScenar = new ArrayList<String>();
+
+
+// pour le niveau d'indentation
+int niveau = 0;
+//le nombre de case dans le switch
+int nbCase = 0;
+//boolean pour savoir si c'est un ensemble dans la boucle for
+boolean ens = false;
+//pour le niveau
+int lvl =0;
+//incrmentation
+
+//si on est dasn un for ou un if imrbiqué
+int nbForOuIf = 0;
+//boolean pour les messages
+boolean actionBoucle = false;
+boolean ifFor = false;
+                                            
+//map appareil
+// variable -> etat
+HashMap <String,String> map1;
+// type -> liste variable
+HashMap <String,HashMap<String,String>> map2;
+// identitifiant -> liste variable
+HashMap <String,HashMap<String,String>> map3;
+
+//map interface
+//ident -> type
+HashMap <String,HashMap<String,String>> mapInterface;
+
+//liste scenario
+ArrayList <String> listeScenario;
+Boolean siFor = false;
+
+//liste pour toutes lesvariables lu dans le scenario
+HashMap <String,String> listeVariables;
+
+//map pour boucle if
+HashMap <String,String> mapIf ;
+
+//liste des paramètre pour un message
+HashMap <String,String> listeMessage;
+
+//map commande
+//ArrayList commande
+ArrayList<String> valeur;
+//ident -> liste scenario
+HashMap <String,ArrayList<String>> mapCommande;
+
+HashMap <String,ArrayList<String>> mapProgrammation;
+
+BufferedWriter habitat;
+BufferedWriter maison;
+
+
+public void initialiser() throws IOException{
+    map1 = new HashMap<String,String>();
+    listeVariables = new HashMap<String,String>();                                              
+    map2 = new HashMap<String,HashMap<String,String>>();
+    map3 = new HashMap<String,HashMap<String,String>>();
+
+    // on réutilise une hashmap de hashmap pour pouvoir reutiliser ceux d'avant
+    // mais la map interface n'a que un type associé à une ou plusieurs variables
+    // donc le second champ de la hashmap est inutile, mais ca sera plus simple d'utiliser comme ça.
+
+    mapInterface = new HashMap<String,HashMap<String,String>>();
+
+  listeMessage = new HashMap<String,String>();
+
+  listeScenario = new ArrayList<String>();
+
+  mapIf = new HashMap<String,String>();
+
+    // Commande
+    mapCommande = new HashMap<String,ArrayList<String>>();
+    mapProgrammation = new HashMap<String, ArrayList<String>>();
+    valeur = new ArrayList<String>();
+
+    habitat = new BufferedWriter(new FileWriter("HabitatSpecific.java"));
+    habitat.write("// HabitatSpecific.java \n");
+    habitat.write("\nimport java.util.ArrayList;\n");
+    habitat.write("\npublic class HabitatSpecific extends Habitat {\n");
+    habitat.write("\n\tpublic HabitatSpecific(ArrayList<CAppareil> lapp, ArrayList<CEnsAppareil> lens, ArrayList<CScenario> lscen, ArrayList<CInterface> lint, ArrayList<CProgrammation> lprog){\n");
+    habitat.write("\t\tsuper(lapp,lens,lscen,lint,lprog);\n");
+    habitat.write("\t}");
+    habitat.write("\n");
+
+    maison = new BufferedWriter(new FileWriter("CMaisonUser.java"));
+    maison.write("// CMaisonUser.java \n");
+    maison.write("public class CMaisonUser extends CMaison \n{\n");
+    maison.write("    public CMaisonUser() {\n");
+    maison.write("\t\tsuper();\n");
+    maison.write("\n");
+}
+
+
+public void ecrireResumer() {
+	System.out.println(" ===== RÉSUMÉ =====");
+	System.out.println("\nNombre d'appareils déclarés : " + nbApp);
+
+	System.out.println("\nNombre d'interfaces déclarées : " + nbInter);
+
+	System.out.println("\nNombre de scenarii déclarés : " + nbScenar);
+
+	System.out.println("\nNom des scenarii déclarés : ");
+	for(int i = 0; i < listeScenar.size(); i++){
+		System.out.println("\t "+ listeScenar.get(i));
+	}
+	
+	System.out.println("\nAssociation Interfaces / Scenarii");
+	for (Map.Entry<String, ArrayList<String>> entry : listeAsso.entrySet()) {
+		System.out.println("Association " + entry.getKey() + " -> " + entry.getValue());
+	}
+
+	System.out.println("\nNom des scenarii programmés : ");
+
+	System.out.println("\n===== FIN RÉSUMÉ =====");
+}
+
+
+public void ecrireTypeAppareil() throws IOException{
+
+    for (Map.Entry<String, HashMap<String,String>> entry2 : map2.entrySet()) {
+        if(entry2.getKey().equals("eclairage")){
+                for (Map.Entry<String, String> entry1 : entry2.getValue().entrySet()) {
+                    maison.write("\t\tCEclairage "+entry1.getKey()+" = new CEclairage(\""+entry1.getKey()+"\",TypeAppareil.ECLAIRAGE);\n");
+                    maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+
+                }
+        }
+
+        if(entry2.getKey().equals("volet")){
+                for (Map.Entry<String, String> entry1 : entry2.getValue().entrySet()) {
+                    maison.write("\t\tCVoletFenetre "+entry1.getKey()+" = new CVoletFenetre(\""+entry1.getKey()+"\",TypeAppareil.VOLET);\n");
+                 maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+                }
+        }
+
+        if(entry2.getKey().equals("fenetre")){
+                for (Map.Entry<String, String> entry1 : entry2.getValue().entrySet()) {
+                    maison.write("\t\tCVoletFenetre "+entry1.getKey()+" = new CVoletFenetre(\""+entry1.getKey()+"\",TypeAppareil.FENETRE);\n");
+                    maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+                }
+        }
+
+        if(entry2.getKey().equals("chauffage")){
+                for (Map.Entry<String, String> entry1 : entry2.getValue().entrySet()) {
+                    maison.write("\t\tCChauffage "+entry1.getKey()+" = new CChauffage(\""+entry1.getKey()+"\",TypeAppareil.CHAUFFAGE);\n");
+                    maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+                }
+        }
+
+        if(entry2.getKey().equals("alarme")){
+                for (Map.Entry<String, String> entry1 : entry2.getValue().entrySet()) {
+                    maison.write("\t\tCAlarme "+entry1.getKey()+" = new CAlarme(\""+entry1.getKey()+"\",TypeAppareil.ALARME);\n");
+                    maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+                }
+        }
+    }
+
+    for (Map.Entry<String, HashMap<String,String>> entry3 : map2.entrySet()) {
+        if(entry3.getKey().equals("cafetiere")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_CAFE);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("hifi")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+               maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_HIFI);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("tv")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_TV);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("portail")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_PORTAIL);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("lave_linge")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_LAVE_LINGE);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("lave_vaisselle")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_LAVE_VAISSELLE);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("video_proj")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_VIDEO_PROJ);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+
+        if(entry3.getKey().equals("seche_linge")){
+            for (Map.Entry<String, String> entry1 : entry3.getValue().entrySet()) {
+                maison.write("\t\tCAutreAppareil "+entry1.getKey()+" = new CAutreAppareil(\""+entry1.getKey()+"\",TypeAppareil.AUTRE_APPAREIL_SECHE_LINGE);\n");
+                maison.write("\t\tma_liste_appareils.add("+entry1.getKey()+");\n");
+            }
+        }
+    } //fin for
+
+    for (Map.Entry<String, HashMap<String,String>> entry4 : map3.entrySet()) {
+        maison.write("\n\t\tCEnsAppareil "+entry4.getKey()+" = new CEnsAppareil(\""+entry4.getKey()+"\");\n");
+
+        for (Map.Entry<String, String> entry1 : entry4.getValue().entrySet()) {
+            maison.write("\t\t" + entry4.getKey()+".addAppareil("+entry1.getKey()+");\n");
+        }
+
+        maison.write("\t\tma_liste_ens_appareils.add("+entry4.getKey()+");\n");
+    }
+    //maison.write("\n");
+    map2 = new HashMap<String,HashMap<String,String>>();
+    map3 = new HashMap<String,HashMap<String,String>>();
+}
+
+
+public void ecrireTypeInterface() throws IOException{
+
+    for (Map.Entry<String, HashMap<String,String>> entry : mapInterface.entrySet()) {
+        if(entry.getKey().equals("interrupteur")){
+            for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+                maison.write("\n\t\tCInterface "+entry1.getKey()+" = new CInterface(\""+entry1.getKey()+"\",TypeInterface.INTERRUPTEUR);\n");
+                maison.write("\t\tma_liste_interfaces.add("+entry1.getKey()+");");
+            }  
+        }
+
+        if(entry.getKey().equals("mobile")){
+            for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+                maison.write("\n\t\tCInterface "+entry1.getKey()+" = new CInterface(\""+entry1.getKey()+"\",TypeInterface.MOBILE);\n");
+                maison.write("\t\tma_liste_interfaces.add("+entry1.getKey()+");");
+            }  
+        }
+
+        if(entry.getKey().equals("telecommande")){
+            for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+                maison.write("\n\t\tCInterface "+entry1.getKey()+" = new CInterface(\""+entry1.getKey()+"\",TypeInterface.TELECOMMANDE);\n");
+                maison.write("\t\tma_liste_interfaces.add("+entry1.getKey()+");");
+            }  
+        }
+
+        if(entry.getKey().equals("telephone")){
+            for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+                maison.write("\n\t\tCInterface "+entry1.getKey()+" = new CInterface(\""+entry1.getKey()+"\",TypeInterface.TELEPHONE);\n");
+                maison.write("\t\tma_liste_interfaces.add("+entry1.getKey()+");");
+            }  
+        }
+
+        if(entry.getKey().equals("tablette")){
+            for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+                maison.write("\n\t\tCInterface "+entry1.getKey()+" = new CInterface(\""+entry1.getKey()+"\",TypeInterface.TABLETTE);\n");
+                maison.write("\t\tma_liste_interfaces.add("+entry1.getKey()+");");
+            }  
+        }
+
+        if(entry.getKey().equals("ordinateur")){
+            for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+                maison.write("\n\t\tCInterface "+entry1.getKey()+" = new CInterface(\""+entry1.getKey()+"\",TypeInterface.ORDINATEUR);\n");
+                maison.write("\t\tma_liste_interfaces.add("+entry1.getKey()+");");
+            }  
+        }
+    }
+    mapInterface = new HashMap<String,HashMap<String,String>>();
+}
+
+public void  ecrireDebScenar(String nom) throws IOException{
+    maison.write("\n         String "+nom+"_contenu = \"\\n     ");
+}
+
+public void ecrireFinScenario(String i) throws IOException{
+  maison.write("\n        CScenario "+i+"= new CScenario(\""+i+"\","+i+"_contenu);\n");
+  maison.write("        ma_liste_scenarios.add("+i+");\n");
+}
+ 
+void exemple_de_fonction(String i1, String i2){
+    String m = "Erreur syntaxique <"+i2+"> au lieu de <"+i1+">";
+    if (!(i1.equals(i2))) parser.report_error(m,null);    
+}
+
+public void ecrirePour(Boolean bool, String ident,String var) throws IOException{
+    //ensemble d'appareil creer
+    if(bool){
+        maison.write("\t\tfor(CEnsAppareil ensAppareil : this.l_ensembles)\\n\t\" + \n\t\"\tif (ensAppareil.nomEnsAppareil.equals(\\\""+var+"\\\"))");
+    }
+
+    if(var.equals("volet")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.VOLET))");
+    }
+    if(var.equals("alarme")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.ALARME))");
+    }
+    if(var.equals("chauffage")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.CHAUFFAGE))");
+    }
+    if(var.equals("eclairage")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.ECLAIRAGE))");
+    }
+    if(var.equals("fenetre")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.FENETRE))");
+    }
+    if(var.equals("cafetiere")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_CAFE))");
+    }
+    if(var.equals("hifi")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_HIFI))");
+    }
+    if(var.equals("tv")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_TV))");
+    }
+    if(var.equals("portail")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_PORTAIL))");
+    }
+    if(var.equals("lave_linge")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_LL))");
+    }
+    if(var.equals("lave_vaisselle")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_LV))");
+    }
+    if(var.equals("video_proj")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_VP))");
+    }
+    if(var.equals("seche_linge")){
+        maison.write("for(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\"\tif (appareil"+nbForOuIf+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_SL))");
+    }
+}
+
+public void ecrireAction(Boolean bool, String i,String a) throws IOException{
+
+
+    String var = "";
+    for (Map.Entry<String, String> entry1 : mapIf.entrySet()) {
+        if(entry1.getValue().equals("actetat")){
+                    var="actetat";
+         }
+         if(entry1.getValue().equals("etat")){
+                    var = "etat";
+         }
+    }
+    if(!bool){
+        maison.write("\tfor(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\\n\t\" + \n\t\t\"\t");
+        for (Map.Entry<String, String> entry1 : listeVariables.entrySet()) {
+                if(entry1.getKey().equals(i)){
+                    if(var.equals("actetat")){
+                        maison.write("if (appareil"+nbForOuIf+".getEtatAppareil().equals(TypeEtatAppareil."+entry1.getKey()+")) ");
+                        ecrireInter();
+                    } else {
+                        maison.write(" if (appareil"+nbForOuIf+".getNomAppareil().equals("+entry1.getKey()+")) ");
+                        ecrireInter();
+                    }
+                }
+        }
+        
+                 maison.write( "appareil"+nbForOuIf+".appliquer(TypeActionAppareil."+a.toUpperCase()+");");
+    } else {
+        for (Map.Entry<String, String> entry1 : listeVariables.entrySet()) {
+                if(entry1.getKey().equals(i)){
+                    maison.write( "appareil"+nbForOuIf+".appliquer(TypeActionAppareil."+a.toUpperCase()+");");
+                }
+        }
+    }
+
+
+}
+
+public void ecrireInter() throws IOException{
+    maison.write("\\n    \" + \n         \"");
+  for(int i=0; i<niveau;i++){
+    for(int j = 0;j<3;j++){
+       maison.write(" ");
+    }
+  }
+}
+
+public void ecrireIf(String i1, String i2) throws IOException{
+  maison.write(" if (");
+  for (Map.Entry<String, String> entry1 : mapIf.entrySet()) {
+      if(entry1.getKey().equals(i1)){
+          if(entry1.getValue().equals("etat")){
+            maison.write(i1+".etatAppareil()");
+          }
+          if(entry1.getValue().equals("ident")){
+            maison.write(i1);
+          }
+          if(entry1.getValue().equals("actetat")){
+            maison.write(i1.toUpperCase());
+          }
+      }
+  }
+  maison.write(".equals(");
+  for (Map.Entry<String, String> entry1 : mapIf.entrySet()) {
+      if(entry1.getKey().equals(i2)){
+          if(entry1.getValue().equals("etat")){
+            maison.write(i1+".etatAppareil()");
+          }
+          if(entry1.getValue().equals("ident")){
+            maison.write(i1);
+          }
+          if(entry1.getValue().equals("actetat")){
+            maison.write(entry1.getKey().toUpperCase());
+          }
+      }
+  }
+  maison.write("))");
+}
+
+public void ecrireFin() throws IOException{
+    maison.write(" \" ;");
+}
+
+public void ecrireExec(String ident) throws IOException{
+  for(int i=0; i<listeScenario.size();i++){
+    if(ident.equals(listeScenario.get(i))){
+      maison.write("this.execScenarioNum("+i+");");
+    }
+  }
+}
+
+public String recupEtatIdent(String id) throws IOException{
+    for (Map.Entry<String, HashMap<String,String>> entry : map2.entrySet()) {
+        for (Map.Entry<String, String> entry1 : entry.getValue().entrySet()) {
+            if(entry1.getKey().equals(id)){
+                return entry1.getValue();
+            }
+        }
+    }
+    return null;
+}
+
+public void ecrireDebutMessage() throws IOException{
+  maison.write("System.out.println(");
+}
+
+public void ecrireMessage(String i) throws IOException{
+    for (Map.Entry<String, String> entry1 : listeMessage.entrySet()) {
+        if(entry1.getKey().equals(i)){
+          if(entry1.getValue().equals("chaine")){
+              maison.write("\\\"");
+              maison.write(entry1.getKey().replaceAll("\"",""));
+              maison.write("\\\"");
+          }
+          if(entry1.getValue().equals("etat")){
+              maison.write(entry1.getKey()+".etatAppareil()");
+          }
+          if(entry1.getValue().equals("ident")){
+              maison.write(entry1.getKey());
+          }
+        }
+    }
+}
+
+public void ecrireTypeCommande() throws IOException{
+    maison.write("\n\n\t\t// Commandes associations\n");
+
+    for (Map.Entry<String, ArrayList<String>> entry : mapCommande.entrySet()) {
+        for(String entry1 : entry.getValue()){
+            maison.write("\t\t" + entry.getKey() + ".addScenarioAssocie(\"" + entry1 + "\");\n");
+        }
+    }
+    mapCommande = new HashMap<String,ArrayList<String>>();
+}
+
+public void ecrireProgrammation() throws IOException{
+    int incrP = 0;
+    int incrD = 0;
+    String pr = "p";
+    String da = "d";
+    maison.write("\n\t\t// Commandes programmation\n");
+    for (Map.Entry<String, ArrayList<String>> entry : mapProgrammation.entrySet()) {
+        incrP++;
+        incrD = 0;
+        maison.write("\t\tCProgrammation " + pr + incrP + " = new CProgrammation(\""+ entry.getKey() + "\");");
+        maison.write("\n");
+        for(String entry1 : entry.getValue()){
+            incrD++;
+            maison.write("\t\tCDate " + pr + incrP + da + incrD + " = new CDate" + entry1 + ";");
+            maison.write("\n");
+            maison.write("\t\t" + pr + incrP + ".addDate(" + pr + incrP + da + incrD + ");");
+            maison.write("\n");
+        }
+        maison.write("\t\tma_liste_programmations.add(" + pr + incrP + ");\n\n");
+    }
+
+    maison.write("\t\tmonHabitat = new HabitatSpecific(ma_liste_appareils, ma_liste_ens_appareils, ma_liste_scenarios, ma_liste_interfaces, ma_liste_programmations);\n");
+    mapProgrammation = new HashMap<String, ArrayList<String>>();
+}
+
+public void ajoutProgrammation(String ident, ArrayList<String> listeDate) throws IOException{
+   boolean present = false;
+   ArrayList<String> ancienneListe = new ArrayList<String>();
+   for (Map.Entry<String, ArrayList<String>> entry : mapProgrammation.entrySet()) {
+      if(ident.equals(entry.getKey())){
+        present = true;
+        ancienneListe = entry.getValue();
+      }
+   }
+   if(present){
+      for(int i=0; i<listeDate.size(); i++){
+           ancienneListe.add(listeDate.get(i));
+      }
+      mapProgrammation.put(ident,ancienneListe);
+   } else {
+      mapProgrammation.put(ident,listeDate);
+   }
+   
+}
+
+
+
+
+//=======================PARTIE HABITAT===============================================================
+//====================================================================================================
+
+public void ecrireDebutHabitat() throws IOException {
+  habitat.write("\tpublic void execScenarioNum(int num){\n");
+  habitat.write("\t\tSystem.out.println( \"Execution du scenario \"+this.l_scenarios.get(num).getNomScenario()+\"...\");");
+  habitat.write("\n\n\t\tswitch(num) {\n");
+}
+
+
+public void ecrireCasScenario() throws IOException {
+  habitat.write("\t\t\tcase "+nbCase+":\n");
+  nbCase++;
+
+}
+
+public void ecrireForHabitat(boolean ident,String var, int lvl) throws IOException{
+  if(var.equals("volet")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.VOLET))\n");
+  }
+  if(var.equals("alarme")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.ALARME))\n");
+  }
+  if(var.equals("chauffage")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.CHAUFFAGE))\n");
+  }
+  if(var.equals("eclairage")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.ECLAIRAGE))\n");
+  }
+  if(var.equals("fenetre")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.FENETRE))\n");
+  }
+  if(var.equals("cafetiere")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_CAFE))\n");
+  }
+  if(var.equals("hifi")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_HIFI))\n");
+  }
+  if(var.equals("tv")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_TV))\n");
+  }
+  if(var.equals("portail")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_PORTAIL))\n");
+  }
+  if(var.equals("lave_linge")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_LL))");
+  }
+  if(var.equals("lave_vaisselle")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_LV))\n");
+  }
+  if(var.equals("video_proj")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_VP))\n");
+  }
+  if(var.equals("seche_linge")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".typeAppareil.equals(TypeAppareil.AUTRE_APPAREIL_SL))\n");
+  }
+  if(var.equals("autre_appareil")){
+    tabulation();
+    habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+    habitat.write("\t\tif (appareil"+lvl+".estTypeAutreAppareil())\n");
+  }
+ 
+
+  //ensemble d'appareil crée
+  if(ident){
+    tabulation();
+    habitat.write("\tfor(CEnsAppareil ensAppareil : this.l_ensembles)\n");
+    habitat.write("\t\tif (ensAppareil.nomEnsAppareil.equals(\""+var+"\"))\n");
+    habitat.write("\t\t\tfor(CAppareil appareil"+lvl+" : ensAppareil.lAppareils)\n");
+    ens = false;
+  }
+
+}
+
+public void ecrireIfHabitat(String nom1, String nom2, int lvl) throws IOException{
+ 
+  habitat.write("\tfor(CAppareil appareil"+lvl+" : this.l_appareils)\n");
+  for (Map.Entry<String, String> entry1 : mapIf.entrySet()) {
+      if(entry1.getKey().equals(nom1)){
+          if(entry1.getValue().equals("etat")){
+            tabulation();
+            habitat.write("if (appareil"+lvl+".getNomAppareil().equals(\""+entry1.getKey()+"\"))\n");
+          }
+          if(entry1.getValue().equals("actetat")){
+            tabulation();
+            habitat.write("if (appareil"+lvl+".getEtatAppareil().equals(TypeEtatAppareil."+entry1.getKey().toUpperCase()+"))\n");
+          }
+      }    
+  }
+  for (Map.Entry<String, String> entry1 : mapIf.entrySet()) {
+       
+      if(entry1.getKey().equals(nom2)){
+          if(entry1.getValue().equals("etat")){
+            tabulation();
+            habitat.write(" \tif (appareil"+lvl+".getNomAppareil().equals(\""+entry1.getKey()+"\"))\n");
+            if(ifFor) habitat.write("{");
+          }
+          if(entry1.getValue().equals("actetat")){
+            tabulation();
+            habitat.write("if (appareil"+lvl+".getEtatAppareil().equals(TypeEtatAppareil."+entry1.getKey().toUpperCase()+"))\n ");
+            if(ifFor) habitat.write("{");
+          }
+      }    
+  }
+}
+
+public void ecrireMessageHabitat(String i) throws IOException{
+    for (Map.Entry<String, String> entry1 : listeMessage.entrySet()) {
+        if(entry1.getKey().equals(i)){
+          if(entry1.getValue().equals("chaine")){
+              habitat.write(entry1.getKey());
+          }
+          if(entry1.getValue().equals("etat")){
+             for (Map.Entry<String, String> entry2 : listeVariables.entrySet()) {
+                    if(entry2.getKey().equals(entry1.getKey())){
+                        habitat.write(entry2.getValue()+".getEtatAppareil()");
+                    }
+                }
+          }
+          if(entry1.getValue().equals("ident")){
+                for (Map.Entry<String, String> entry2 : listeVariables.entrySet()) {
+                    if(entry2.getKey().equals(entry1.getKey())){
+                        habitat.write(entry2.getValue()+".getNomAppareil()");
+                    }
+                }
+          }
+        }
+    }
+}
+
+public void tabulation() throws IOException{
+    for(int i=0; i<nbForOuIf ;i++){
+        habitat.write("\t");
+    }
+}
+
+
+public void ajoutValeurHabitat(String var) throws IOException{
+    boolean la = false;
+    for (Map.Entry<String, String> entry1 : listeVariables.entrySet()) {
+        if(var.equals(entry1.getKey())){
+            la = true;
+        }
+    }
+    if(!la){
+        listeVariables.put(var,"appareil"+nbForOuIf);
+    }
+}
+
+
+public void ecrireActionHabitat(String id, String et, boolean boucle) throws IOException{
+    if(!boucle){
+        habitat.write("\tfor(CAppareil appareil"+nbForOuIf+" : this.l_appareils)\n");
+        habitat.write("if (appareil"+nbForOuIf+".getNomAppareil().equals(\""+id+"\")) ");
+        for (Map.Entry<String, String> entry1 : listeVariables.entrySet()) {
+                if(entry1.getKey().equals(id)){
+                    habitat.write(entry1.getValue()+".appliquer(TypeActionAppareil."+et.toUpperCase()+");\n");
+                }
+        }
+    } else {
+        for (Map.Entry<String, String> entry1 : listeVariables.entrySet()) {
+                if(entry1.getKey().equals(id)){
+                    habitat.write(entry1.getValue()+".appliquer(TypeActionAppareil."+et.toUpperCase()+");\n");
+                }
+        }
+    }
+
+}
+:}
+
+
+terminal  String ENTIER;
+terminal String DEBPROG, FINPROG, DEBAPP, TYPE, IDENT, VIRG, POINT, AUTAPP, PARO, AUTTYPE, PARF, FINAPP, DEBINTER, INTER, FININTER, DEBSCENAR, SCENAD, CHEVD, DEQUAL, EQUL, POINTV, DEUXP, ACOO, ACOF, FINSCENAR, SCENAF, COMMO, COMMF, CHAINE, COMMENTAIRE, ACTION, ETAT, ACTETAT, ASSOC, PROG, EXEC, POURTT, FAIRE, FAIT, MESSD, SI, ALORS, SINON, FSI, DEF, UND, GUIL;
+
+non terminal prog, liste, listeligne;
+non terminal blocappareil, ligne, var, varAp;
+non terminal blocinterface, inter, listeinter, varInt;
+non terminal blocscenarii, blocscenario, suite, listeblocscenario, listesuite;
+non terminal bloccommande, lignecommande, commande, res, suiteprog, date, choix, listelignecommande;
+non terminal String for, variable, message, interieurmess, if, sinon, truc, com, listeinterieurmess, varif;
+non terminal error_virg;
+ 
+prog    ::= {: initialiser(); ecrireDebutHabitat(); :} liste
+                |  {: System.out.println("FINPROG "+parser.pline()+","+parser.pcolumn()); :} ;
+
+com ::= COMMENTAIRE com
+        |;
+
+liste ::= com DEBPROG  com blocappareil  com blocinterface  com blocscenarii  com bloccommande  com FINPROG com
+{:
+	ecrireResumer();
+	maison.write("\n\t}");
+	maison.write("\n}");
+	maison.close();
+
+	habitat.write("\t\t default :\n");
+	habitat.write("\n\t\t}");
+	habitat.write("\n\t}");
+	habitat.write("\n}");
+	habitat.close();
+:};
+
+
+
+
+
+//============================BLOC APPAREIL========================
+//=================================================================
+
+blocappareil ::= DEBAPP listeligne FINAPP ;
+
+listeligne ::= ligne {: ecrireTypeAppareil(); :}
+              |ligne {: ecrireTypeAppareil(); :} listeligne
+              |error ;
+
+ligne ::=      TYPE:t varAp:i POINT {:  map2.put(t,map1);  map1 = new HashMap<String,String>(); :}
+              |AUTAPP PARO AUTTYPE:at PARF varAp:i POINT {: map2.put(at,map1); map1 = new HashMap<String,String>(); :}
+              |DEF IDENT:id EQUL ACOO var:i ACOF POINT {: map3.put(id,map1); map1 = new HashMap<String,String>(); :}
+              |COMMENTAIRE;
+
+
+varAp ::=	IDENT:i             {: nbApp++; map1.put(i,"etat"); :}
+              	|IDENT:i VIRG varAp {: nbApp++; map1.put(i,"etat"); :}
+           	|error_virg;
+
+error_virg ::= IDENT:i varAp {: System.out.println(" Erreur ligne "+parser.pline()+" colonne "+parser.pcolumn()+" : => "+" pas de virgule apres " +i); :};
+
+
+
+
+var ::=		IDENT:i           {: map1.put(i,"etat"); :}
+              	|IDENT:i VIRG var {: map1.put(i,"etat"); :}
+           	|error_virg;
+
+//============================BLOC INTERFACE =======================
+//==================================================================
+blocinterface ::= DEBINTER listeinter FININTER ;
+
+listeinter ::= inter {: ecrireTypeInterface(); :}
+                | inter {: ecrireTypeInterface(); :} listeinter
+                | error;
+
+inter ::= INTER:a varInt POINT {: mapInterface.put(a,map1); map1 = new HashMap<String,String>(); :}
+            | COMMENTAIRE;
+           
+
+varInt ::=	IDENT:i             {: nbInter++; map1.put(i,"etat"); :}
+              	|IDENT:i VIRG varInt {: nbInter++; map1.put(i,"etat"); :}
+           	|error_virg;
+
+
+//============================BLOC SCENARII SCENARIO===============
+//=================================================================
+
+blocscenarii ::= DEBSCENAR listeblocscenario FINSCENAR ;
+
+listeblocscenario ::=	blocscenario
+                        | blocscenario listeblocscenario;
+
+blocscenario ::= SCENAD  IDENT:i {: listeScenar.add(i); nbScenar++; listeScenario.add(i); ecrireDebScenar(i); ecrireCasScenario(); :} CHEVD listesuite {: ecrireFin(); nbForOuIf=0; :}SCENAF IDENT CHEVD{: ecrireFinScenario(i); habitat.write("\tbreak ;\n\n"); listeVariables = new HashMap<String,String>(); :}
+                | COMMENTAIRE
+                | error;
+
+listesuite ::= suite
+                | suite  {: ecrireInter(); :} listesuite ;
+
+suite ::=  IDENT:i POINT ACTION:a POINTV {: ajoutValeurHabitat(i); ecrireAction(actionBoucle, i,a); ecrireActionHabitat(i,a, actionBoucle); :}
+    | {: nbForOuIf++ ; actionBoucle = true; ifFor = true; :} for  
+    | message
+    | {:  niveau ++; nbForOuIf++; actionBoucle = true; :} if {: ifFor = true;  :}
+    | EXEC IDENT:i POINTV {: ecrireExec(i); :}
+  | COMMENTAIRE;
+
+
+
+//==========================boucle pourtout et message==============
+//==================================================================
+
+for ::= POURTT IDENT:i DEUXP variable:v  {: ajoutValeurHabitat(i); ecrirePour(ens, i,v); ecrireForHabitat(ens,v,nbForOuIf); niveau++; ecrireInter();  :} FAIRE listesuite FAIT POINTV {: niveau--; actionBoucle = false;  :} ;
+        
+
+variable ::= TYPE:t                      {: RESULT = t; :}
+            |AUTAPP PARO AUTTYPE:at PARF {: RESULT = at; :}
+            |AUTAPP:a                    {: RESULT = a; :}
+            |IDENT:i                     {: RESULT = i; ajoutValeurHabitat(i); ens=true; :} ;
+
+message ::= MESSD PARO {: ecrireDebutMessage(); habitat.write("System.out.println("); :} listeinterieurmess {: maison.write(")"); habitat.write(");\n"); :}  PARF POINTV;
+
+listeinterieurmess ::= interieurmess  
+                      |interieurmess  {: maison.write("+"); habitat.write("+"); :}  VIRG listeinterieurmess;  
+
+interieurmess ::= CHAINE:c           {: listeMessage.put(c,"chaine");  ecrireMessage(c); ecrireMessageHabitat(c);:}
+                 |IDENT:i            {: listeMessage.put(i,"ident"); ajoutValeurHabitat(i); ecrireMessage(i); ecrireMessageHabitat(i); :}
+                 |IDENT:i POINT ETAT {: listeMessage.put(i,"etat");  ajoutValeurHabitat(i); ecrireMessage(i); ecrireMessageHabitat(i); :}
+                 |error;
+
+
+truc::= varif:i1 DEQUAL varif:i2 {: ecrireIf(i1,i2); ecrireInter(); ecrireIfHabitat(i1,i2,nbForOuIf); :};
+
+varif ::= IDENT:i POINT ETAT {: RESULT = i; ajoutValeurHabitat(i); mapIf.put(i,"etat"); :}
+         |IDENT:i            {: RESULT=i; ajoutValeurHabitat(i); mapIf.put(i,"ident"); :}
+         |ACTETAT:a          {: RESULT =a; mapIf.put(a,"actetat"); :};
+
+if ::= SI PARO truc  PARF ALORS  listesuite FSI POINTV {:  if(ifFor)habitat.write("}");  ifFor = false; actionBoucle = false;:}
+        |SI PARO truc PARF  ALORS listesuite sinon;
+      
+
+sinon ::= SINON {: habitat.write("\t\t } else {"); :} listesuite FSI POINTV {:   habitat.write("}"); actionBoucle = false;:};
+
+
+
+//====================DECLARATION COMMANDE ========================
+
+bloccommande ::= COMMO listelignecommande COMMF {: ecrireTypeCommande(); ecrireProgrammation(); :} ;
+
+listelignecommande ::= lignecommande
+                        | lignecommande listelignecommande;
+
+lignecommande ::= ASSOC IDENT:id EQUL commande POINT {: listeAsso.put(id, valeur); mapCommande.put(id, valeur); valeur = new ArrayList<String>(); :}
+                   | PROG IDENT:i EQUL suiteprog POINT {: ajoutProgrammation(i,valeur);  valeur = new ArrayList<String>(); :}
+                  | COMMENTAIRE;
+
+commande ::= IDENT:i {: valeur.add(i); :}
+           | ACOO res ACOF;
+
+res ::= IDENT:i {: valeur.add(i); :}
+        | IDENT:i VIRG res {: valeur.add(i); :}
+    ;
+
+suiteprog ::= date:d
+               | date:d VIRG suiteprog
+               | ACOO date:d VIRG suiteprog ACOF
+    ;
+
+date ::= PARO choix:c1 VIRG choix:c2 VIRG choix:c3 VIRG choix:c4 VIRG choix:c5 PARF {:
+                  String d = "(" + c1 + ", " + c2 + ", " + c3 + ", " + c4 + ", " + c5 + ")" ;
+                  valeur.add(d); :} ;
+
+choix ::= ENTIER:nb {: RESULT = nb; :}
+    | UND {: RESULT = -1; :}
+    ;
